@@ -1,27 +1,54 @@
-from tableauhyperapi import HyperProcess, Connection, Telemetry
+from tableauhyperapi import HyperProcess, Connection, Telemetry, TableDefinition, Inserter, SqlType
 import pandas as pd
 
-def read_hyper_file(hyper_file_path):
-    with HyperProcess(telemetry=Telemetry.SEND_USAGE_DATA_TO_TABLEAU) as hyper:
-        with Connection(endpoint=hyper.endpoint, database=hyper_file_path) as connection:
-            # Get all table names in the hyper file
-            table_names = connection.catalog.get_table_names(schema='public')
-            print(f"Tables in {hyper_file_path}: {table_names}")
+def dataframe_memory_size(dataframe):
+    """Calculate the memory size of a DataFrame in bytes."""
+    return dataframe.memory_usage(index=True, deep=True).sum()
 
-            for table_name in table_names:
-                # Get the table definition to list out all columns
-                table_definition = connection.catalog.get_table_definition(table_name, schema='public')
-                columns = [column.name for column in table_definition.columns]
+def read_data_from_csv(input_file):
+    """Read data from a CSV file into a DataFrame."""
+    dataframe = pd.read_csv(input_file)
+    return dataframe
 
-                # Fetch all rows from the table
-                result = connection.execute_query(f"SELECT * FROM public.{table_name}")
-                rows = result.fetchall()
+def split_csv_file(input_file, output_prefix, max_size_bytes):
+    # Read data from the CSV file
+    dataframe = read_data_from_csv(input_file)
 
-                # Create a pandas DataFrame from the rows and columns
-                df = pd.DataFrame(rows, columns=columns)
-                print(f"\nData from table public.{table_name}:")
-                print(df)
+    # Calculate the size of the DataFrame and split it into chunks
+    size = 0
+    chunks = []
+    chunk = []
+    for index, row in dataframe.iterrows():
+        row_size = dataframe_memory_size(pd.DataFrame([row]))
+        if size + row_size > max_size_bytes and chunk:
+            chunks.append(pd.DataFrame(chunk))
+            chunk = []
+            size = 0
+        chunk.append(row)
+        size += row_size
+    if chunk:
+        chunks.append(pd.DataFrame(chunk))
+
+    # Write each chunk to a new Hyper file
+    for i, chunk in enumerate(chunks):
+        output_file = f"{output_prefix}_{i}.hyper"
+        
+        with HyperProcess(telemetry=Telemetry.SEND_USAGE_DATA_TO_TABLEAU) as hyper:
+            with Connection(endpoint=hyper.endpoint, database=output_file, create_mode='create_and_replace') as connection:
+                # Define the table structure based on the DataFrame
+                table_definition = TableDefinition(table_name='Extract', columns=[(name, SqlType.text()) for name in chunk.columns])
+                
+                # Create the table in the Hyper file
+                connection.catalog.create_table(table_definition)
+                
+                # Insert the data into the table
+                with Inserter(connection, table_definition) as inserter:
+                    inserter.add_rows(rows=chunk.itertuples(index=False, name=None))
+                    inserter.execute()
 
 if __name__ == "__main__":
-    hyper_file_path = 'your_hyper_file_path.hyper'  # Replace with the path to your .hyper file
-    read_hyper_file(hyper_file_path)
+    input_file = "your_input_file.csv"
+    output_prefix = "your_output_prefix"
+    max_size_bytes = 1000  # Max size of each output file in bytes
+    
+    split_csv_file(input_file, output_prefix, max_size_bytes)

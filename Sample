@@ -59,3 +59,30 @@ if __name__ == "__main__":
     max_size_bytes = 1000  # Max size of each output file in bytes
     
     split_hyper_file(input_file, table_name, output_prefix, max_size_bytes)
+
+
+from tableauhyperapi import HyperProcess, Connection, Telemetry, TableDefinition
+
+def read_tables_from_hyper(input_file):
+    with HyperProcess(telemetry=Telemetry.SEND_USAGE_DATA_TO_TABLEAU) as hyper:
+        with Connection(endpoint=hyper.endpoint, database=input_file) as connection:
+            # Get the list of tables in the Hyper file
+            table_names = connection.catalog.get_table_names()
+            print(f"Tables in {input_file}: {table_names}")
+
+            # Read data from each table
+            for table_name in table_names:
+                table_definition = connection.catalog.get_table_definition(table_name)
+                result = connection.execute_query(f"SELECT * FROM {table_name}")
+                data = result.fetchall()
+                columns = [col.name for col in table_definition.columns]
+                
+                # Convert the data to a pandas DataFrame (optional)
+                df = pd.DataFrame(data, columns=columns)
+                print(f"\nData from {table_name} table:")
+                print(df)
+
+if __name__ == "__main__":
+    input_file = "your_input_file.hyper"
+    read_tables_from_hyper(input_file)
+

@@ -1,94 +1,30 @@
-from tableauhyperapi import HyperProcess, Connection, Telemetry, TableDefinition, Inserter, SqlType
-import os
-
-def dataframe_memory_size(dataframe):
-    """Calculate the memory size of a DataFrame in bytes."""
-    return dataframe.memory_usage(index=True, deep=True).sum()
-
-def read_data_from_hyper(input_file, table_name):
-    """Read data from a Hyper file into a DataFrame."""
-    with HyperProcess(telemetry=Telemetry.SEND_USAGE_DATA_TO_TABLEAU) as hyper:
-        with Connection(endpoint=hyper.endpoint, database=input_file) as connection:
-            table_definition = connection.catalog.get_table_definition(table_name)
-            result = connection.execute_query(f"SELECT * FROM {table_name}")
-            data = result.fetchall()
-            columns = [col.name for col in table_definition.columns]
-            dataframe = pd.DataFrame(data, columns=columns)
-    return dataframe
-
-def split_hyper_file(input_file, table_name, output_prefix, max_size_bytes):
-    # Read data from the Hyper file
-    dataframe = read_data_from_hyper(input_file, table_name)
-
-    # Calculate the size of the DataFrame and split it into chunks
-    size = 0
-    chunks = []
-    chunk = []
-    for index, row in dataframe.iterrows():
-        row_size = dataframe_memory_size(pd.DataFrame([row]))
-        if size + row_size > max_size_bytes and chunk:
-            chunks.append(pd.DataFrame(chunk))
-            chunk = []
-            size = 0
-        chunk.append(row)
-        size += row_size
-    if chunk:
-        chunks.append(pd.DataFrame(chunk))
-
-    # Write each chunk to a new Hyper file
-    for i, chunk in enumerate(chunks):
-        output_file = f"{output_prefix}_{i}.hyper"
-        
-        with HyperProcess(telemetry=Telemetry.SEND_USAGE_DATA_TO_TABLEAU) as hyper:
-            with Connection(endpoint=hyper.endpoint, database=output_file, create_mode='create_and_replace') as connection:
-                # Define the table structure based on the DataFrame
-                table_definition = TableDefinition(table_name='Extract', columns=[(name, SqlType.text()) for name in chunk.columns])
-                
-                # Create the table in the Hyper file
-                connection.catalog.create_table(table_definition)
-                
-                # Insert the data into the table
-                with Inserter(connection, table_definition) as inserter:
-                    inserter.add_rows(rows=chunk.itertuples(index=False, name=None))
-                    inserter.execute()
-
-if __name__ == "__main__":
-    input_file = "your_input_file.hyper"
-    table_name = "your_table_name"
-    output_prefix = "your_output_prefix"
-    max_size_bytes = 1000  # Max size of each output file in bytes
-    
-    split_hyper_file(input_file, table_name, output_prefix, max_size_bytes)
-
-
-from tableauhyperapi import HyperProcess, Connection, Telemetry, TableDefinition
+from tableauhyperapi import HyperProcess, Connection, Telemetry
 
 def read_tables_from_hyper(input_file):
     with HyperProcess(telemetry=Telemetry.SEND_USAGE_DATA_TO_TABLEAU) as hyper:
         with Connection(endpoint=hyper.endpoint, database=input_file) as connection:
-            # Get the list of tables in the Hyper file
-            table_names = connection.catalog.get_table_names()
-            print(f"Tables in {input_file}: {table_names}")
+            # Get the list of schemas in the Hyper file
+            schemas = connection.catalog.get_schemas()
+            print(f"Schemas in {input_file}: {schemas}")
 
-            # Read data from each table
-            for table_name in table_names:
-                table_definition = connection.catalog.get_table_definition(table_name)
-                result = connection.execute_query(f"SELECT * FROM {table_name}")
-                data = result.fetchall()
-                columns = [col.name for col in table_definition.columns]
-                
-                # Convert the data to a pandas DataFrame (optional)
-                df = pd.DataFrame(data, columns=columns)
-                print(f"\nData from {table_name} table:")
-                print(df)
+            # Read data from each schema and table
+            for schema in schemas:
+                # Get the list of tables in each schema
+                table_names = connection.catalog.get_table_names(schema=schema)
+                print(f"\nTables in schema {schema}: {table_names}")
+
+                # Read data from each table
+                for table_name in table_names:
+                    table_definition = connection.catalog.get_table_definition(name=table_name, schema=schema)
+                    result = connection.execute_query(f"SELECT * FROM {schema}.{table_name}")
+                    data = result.fetchall()
+                    columns = [col.name for col in table_definition.columns]
+                    
+                    # Convert the data to a pandas DataFrame (optional)
+                    df = pd.DataFrame(data, columns=columns)
+                    print(f"\nData from {schema}.{table_name} table:")
+                    print(df)
 
 if __name__ == "__main__":
     input_file = "your_input_file.hyper"
     read_tables_from_hyper(input_file)
-
-schemas = connection.catalog.get_schemas()
-print("Schemas:", schemas)
-
-# Use the first schema in the list
-schema_name = schemas[0]
-table_definition = connection.catalog.get_table_definition(table_name, schema=schema_name)

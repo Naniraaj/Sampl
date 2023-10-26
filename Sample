@@ -4,23 +4,28 @@ import pandas as pd
 def read_hyper_file(hyper_file_path):
     with HyperProcess(telemetry=Telemetry.SEND_USAGE_DATA_TO_TABLEAU) as hyper:
         with Connection(endpoint=hyper.endpoint, database=hyper_file_path) as connection:
-            # Get all table names in the hyper file
-            table_names = connection.catalog.get_table_names()
-            print(f"Tables in {hyper_file_path}: {table_names}")
+            # Get all schema names in the hyper file
+            schema_names = connection.catalog.get_schemas()
+            print(f"Schemas in {hyper_file_path}: {schema_names}")
 
-            for table_name in table_names:
-                # Get the table definition to list out all columns
-                table_definition = connection.catalog.get_table_definition(table_name)
-                columns = [column.name for column in table_definition.columns]
+            for schema_name in schema_names:
+                # Get all table names in the schema
+                table_names = connection.catalog.get_table_names(schema=schema_name)
+                print(f"Tables in schema {schema_name}: {table_names}")
 
-                # Fetch all rows from the table
-                result = connection.execute_query(f"SELECT * FROM {table_name}")
-                rows = result.fetchall()
+                for table_name in table_names:
+                    # Get the table definition to list out all columns
+                    table_definition = connection.catalog.get_table_definition(table_name, schema=schema_name)
+                    columns = [column.name for column in table_definition.columns]
 
-                # Create a pandas DataFrame from the rows and columns
-                df = pd.DataFrame(rows, columns=columns)
-                print(f"\nData from table {table_name}:")
-                print(df)
+                    # Fetch all rows from the table
+                    result = connection.execute_query(f"SELECT * FROM {schema_name}.{table_name}")
+                    rows = result.fetchall()
+
+                    # Create a pandas DataFrame from the rows and columns
+                    df = pd.DataFrame(rows, columns=columns)
+                    print(f"\nData from table {schema_name}.{table_name}:")
+                    print(df)
 
 if __name__ == "__main__":
     hyper_file_path = 'your_hyper_file_path.hyper'  # Replace with the path to your .hyper file

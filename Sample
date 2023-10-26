@@ -86,3 +86,9 @@ if __name__ == "__main__":
     input_file = "your_input_file.hyper"
     read_tables_from_hyper(input_file)
 
+schemas = connection.catalog.get_schemas()
+print("Schemas:", schemas)
+
+# Use the first schema in the list
+schema_name = schemas[0]
+table_definition = connection.catalog.get_table_definition(table_name, schema=schema_name)
